@@ -1,0 +1,28 @@
+name: Agent Producer
+on:
+  workflow_dispatch:
+    inputs:
+      prompt:
+        description: "Prompt for the agent"
+        required: true
+        default: "calc 2+2*3"
+
+jobs:
+  produce:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.11' }
+      - run: pip install kafka-python
+      - name: Send intent to Redpanda
+        env:
+          RP_BOOTSTRAP: ${{ secrets.RP_BOOTSTRAP }}
+          RP_USERNAME:  ${{ secrets.RP_USERNAME }}
+          RP_PASSWORD:  ${{ secrets.RP_PASSWORD }}
+          TOPIC_INTENTS: ${{ secrets.TOPIC_INTENTS || 'agent-intents' }}
+          PROMPT: ${{ github.event.inputs.prompt }}
+        run: |
+          python agent/producer.py | tee /tmp/out.json
+          echo "## Producer Output" >> $GITHUB_STEP_SUMMARY
+          cat /tmp/out.json >> $GITHUB_STEP_SUMMARY
