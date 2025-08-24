@@ -1,0 +1,30 @@
+name: Agent Worker
+on:
+  schedule:
+    - cron: '*/1 * * * *'   # every minute
+  workflow_dispatch: {}
+
+jobs:
+  work:
+    runs-on: ubuntu-latest
+    concurrency:
+      group: agent-worker
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.11' }
+      - run: pip install kafka-python
+      - name: Consume intents and publish results
+        env:
+          RP_BOOTSTRAP: ${{ secrets.RP_BOOTSTRAP }}
+          RP_USERNAME:  ${{ secrets.RP_USERNAME }}
+          RP_PASSWORD:  ${{ secrets.RP_PASSWORD }}
+          TOPIC_INTENTS: ${{ secrets.TOPIC_INTENTS || 'agent-intents' }}
+          TOPIC_OUTPUTS: ${{ secrets.TOPIC_OUTPUTS || 'agent-outputs' }}
+          GROUP_ID:      ${{ secrets.GROUP_ID || 'agent-worker' }}
+          POLL_SECONDS:  20
+        run: |
+          python agent/worker.py | tee /tmp/worker.json
+          echo "## Worker Output" >> $GITHUB_STEP_SUMMARY
+          cat /tmp/worker.json >> $GITHUB_STEP_SUMMARY
