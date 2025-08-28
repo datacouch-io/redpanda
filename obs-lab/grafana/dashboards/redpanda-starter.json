@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 39,
+  "title": "Redpanda Starter (Prometheus)",
+  "time": { "from": "now-30m", "to": "now" },
+  "panels": [
+    {
+      "type": "stat",
+      "title": "Broker Up",
+      "gridPos": { "h": 6, "w": 6, "x": 0, "y": 0 },
+      "targets": [{ "expr": "sum(up{job=\"redpanda\"})" }]
+    },
+    {
+      "type": "timeseries",
+      "title": "Scrape Duration (s)",
+      "gridPos": { "h": 6, "w": 12, "x": 6, "y": 0 },
+      "targets": [{ "expr": "max(scrape_duration_seconds{job=\"redpanda\"})" }]
+    },
+    {
+      "type": "timeseries",
+      "title": "Produce Rate by Topic (5m)",
+      "gridPos": { "h": 8, "w": 18, "x": 0, "y": 6 },
+      "targets": [{
+        "expr": "sum by (topic) (rate(vectorized_cluster_partition_batches_produced{namespace=\"kafka\"}[5m]))"
+      }]
+    }
+  ]
+}

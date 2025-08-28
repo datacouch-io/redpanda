@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 39,
+  "title": "Redpanda Starter (Prometheus)",
+  "tags": ["redpanda","starter"],
+  "timezone": "browser",
+  "panels": [
+    {
+      "type": "stat",
+      "title": "Broker Up",
+      "gridPos": { "h": 6, "w": 6, "x": 0, "y": 0 },
+      "targets": [{ "expr": "sum(up{job=\"redpanda\"})" }],
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "orientation": "horizontal" }
+    },
+    {
+      "type": "timeseries",
+      "title": "Scrape Duration (s)",
+      "gridPos": { "h": 6, "w": 12, "x": 6, "y": 0 },
+      "targets": [{ "expr": "max(scrape_duration_seconds{job=\"redpanda\"})" }],
+      "options": { "legend": { "displayMode": "list", "placement": "right" } }
+    },
+    {
+      "type": "timeseries",
+      "title": "Any Redpanda Metrics (discover)",
+      "gridPos": { "h": 8, "w": 18, "x": 0, "y": 6 },
+      "targets": [{ "expr": "sum by(__name__) (count_over_time({job=\"redpanda\"}[5m]))", "legendFormat": "{{__name__}}" }],
+      "description": "Use Explore to discover concrete 'redpanda_*' metrics in your build and replace this with actual rate/volume queries."
+    }
+  ],
+  "time": { "from": "now-30m", "to": "now" }
+}

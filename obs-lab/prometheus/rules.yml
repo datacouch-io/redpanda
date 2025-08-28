@@ -1,0 +1,26 @@
+groups:
+- name: redpanda.rules
+  rules:
+  - alert: RedpandaDown
+    expr: up{job="redpanda"} == 0
+    for: 1m
+    labels: { severity: critical }
+    annotations:
+      summary: "Redpanda broker is down"
+      description: "The 'up' metric for job=redpanda is 0 for 1 minute."
+
+  - alert: RedpandaScrapeSlow
+    expr: scrape_duration_seconds{job="redpanda"} > 1
+    for: 5m
+    labels: { severity: warning }
+    annotations:
+      summary: "Redpanda scrape is slow (>1s)"
+      description: "scrape_duration_seconds > 1s for 5 minutes."
+
+  - alert: RedpandaMetricsMissing
+    expr: absent(up{job="redpanda"})
+    for: 5m
+    labels: { severity: warning }
+    annotations:
+      summary: "No Redpanda metrics found"
+      description: "Prometheus cannot find 'up{job=\"redpanda\"}'."

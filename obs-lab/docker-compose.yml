@@ -1,0 +1,188 @@
+version: "3.8"
+
+services:
+  redpanda:
+    image: redpandadata/redpanda:latest
+    container_name: redpanda
+    command:
+      - redpanda
+      - start
+      - --overprovisioned
+      - --smp=1
+      - --memory=1G
+      - --reserve-memory=0M
+      - --node-id=0
+      - --check=false
+      # Two Kafka listeners: internal (containers) + external (host)
+      - --kafka-addr=PLAINTEXT://0.0.0.0:9092,OUTSIDE://0.0.0.0:19092
+      - --advertise-kafka-addr=PLAINTEXT://redpanda:9092,OUTSIDE://localhost:19092
+      # RPC (node-to-node / client metadata)
+      - --rpc-addr=0.0.0.0:33145
+      - --advertise-rpc-addr=redpanda:33145
+    ports:
+      - "9092:9092"     # containers use redpanda:9092
+      - "19092:19092"   # host apps use localhost:19092
+      - "9644:9644"     # admin/metrics endpoint
+    volumes:
+      - redpanda-data:/var/lib/redpanda/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:9644/v1/status/ready >/dev/null"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 10s
+    networks: [redpanda-net]
+    restart: unless-stopped
+
+  console:
+    image: redpandadata/console:latest
+    container_name: redpanda-console
+    depends_on:
+      redpanda: { condition: service_healthy }
+    environment:
+      KAFKA_BROKERS: redpanda:9092
+    ports:
+      - "8080:8080"
+    networks: [redpanda-net]
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    depends_on:
+      redpanda: { condition: service_healthy }
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=3d
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus:/etc/prometheus
+    networks: [redpanda-net]
+    restart: unless-stopped
+
+  alertmanager:
+    image: prom/alertmanager:latest
+    container_name: alertmanager
+    ports:
+      - "9093:9093"
+    volumes:
+      - ./alertmanager/alertmanager.yml:/etc/alertmanager/config.yml:ro
+    networks: [redpanda-net]
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    depends_on:
+      prometheus:
+        condition: service_started
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning
+      - ./grafana/dashboards:/var/lib/grafana/dashboards
+    networks: [redpanda-net]
+    restart: unless-stopped
+  
+  kafka-exporter:
+    image: danielqsj/kafka-exporter:latest
+    container_name: kafka-exporter
+    command:
+      - --kafka.server=redpanda:9092
+      - --web.listen-address=0.0.0.0:9308
+      - --group.filter=.*
+      - --topic.filter=.*
+    ports:
+      - "9308:9308"
+    depends_on:
+      redpanda:
+        condition: service_healthy
+    networks: [redpanda-net]
+    restart: unless-stopped
+
+  node-exporter:
+    image: prom/node-exporter:latest
+    container_name: node-exporter
+    # No host PID, no rootfs bind from macOS
+    command:
+      - --collector.disable-defaults
+      - --collector.cpu
+      - --collector.meminfo
+      - --collector.filesystem
+      - --path.rootfs=/
+    ports:
+      - "9100:9100"
+    networks: [redpanda-net]
+    restart: unless-stopped
+
+  agent:
+    build: ./agent-service
+    container_name: agent
+    depends_on:
+      redpanda: { condition: service_healthy }
+      prometheus: { condition: service_started }
+    environment:
+      BROKERS: redpanda:9092
+      PROM_URL: http://prometheus:9090
+      TASK_TOPIC: agent.tasks
+      ACTION_TOPIC: agent.actions
+      JOURNAL_TOPIC: agent.journal
+      GROUP_ID: agent-svc
+      LAG_THRESHOLD: "1000"
+      COOLDOWN_SEC: "600"
+      CHECK_INTERVAL: "20"
+      USE_RAW_LAG: "0"   # set to "1" if you have no recording rule
+      DB_PATH: /data/agent.db
+      SERVICE_PORT: "8088"
+    ports:
+      - "8088:8088"   # health endpoint
+    networks: [redpanda-net]
+    volumes:
+      - agent-data:/data
+    restart: unless-stopped
+
+  pe-runner:
+    build:
+      context: ./pe-lab/runner        # <-- match your actual path
+      dockerfile: Dockerfile
+    environment:
+      BROKERS: redpanda:9092
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
+      IN_TOPIC: pe.prompts
+      OUT_TOPIC: pe.outputs
+      ERR_TOPIC: pe.errors
+    depends_on:
+      redpanda:
+        condition: service_healthy
+    networks: [redpanda-net]
+    # If your app needs the CSV at runtime, mount it in (optional):
+    volumes:
+      - ./pe-lab/seeds:/app/seeds:ro
+
+  pe-studio:
+    build: ./pe-lab/streamlit-app
+    environment:
+      BROKERS: redpanda:9092
+      IN_TOPIC: pe.prompts
+      OUT_TOPIC: pe.outputs
+      ERR_TOPIC: pe.errors
+    ports:
+      - "8501:8501"
+    depends_on:
+      redpanda: { condition: service_healthy }
+    networks: [redpanda-net]
+
+
+volumes:
+  redpanda-data:
+  agent-data:
+
+networks:
+  redpanda-net:
+    external: true   # reuse the network you created for redpanda/console

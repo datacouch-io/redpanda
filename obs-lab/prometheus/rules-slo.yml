@@ -1,0 +1,71 @@
+groups:
+- name: "slo.signals"
+  rules:
+  - record: "rp:produce_batches_per_sec:topic"
+    expr: "sum by (topic) (rate(vectorized_cluster_partition_batches_produced{namespace=\"kafka\"}[5m]))"
+  - record: "rp:produce_batches_per_sec"
+    expr: "sum(rate(vectorized_cluster_partition_batches_produced{namespace=\"kafka\"}[5m]))"
+  - record: "rp:consumer_lag_avg_5m:group_topic"
+    expr: "avg by (consumergroup, topic) (avg_over_time(kafka_consumergroup_lag[5m]))"
+  - record: "rp:consumer_lag_max_5m:group_topic"
+    expr: "max by (consumergroup, topic) (max_over_time(kafka_consumergroup_lag[5m]))"
+  - record: "rp:consume_bytes_per_sec:topic"
+    expr: "sum by (topic) (rate(vectorized_cluster_partition_bytes_fetched_total{namespace=\"kafka\"}[5m]))"
+  - record: "host:disk_used_percent"
+    expr: "100 * (1 - (node_filesystem_avail_bytes{mountpoint=\"/\"} / node_filesystem_size_bytes{mountpoint=\"/\"}))"
+
+- name: "slo.alerts"
+  rules:
+  - alert: "RedpandaDown"
+    expr: "up{job=\"redpanda\"} == 0"
+    for: 1m
+    labels: { severity: "critical", service: "redpanda" }
+    annotations:
+      summary: "Redpanda broker is down"
+      description: "No metrics from job=redpanda for 1 minute."
+      runbook: "Check container status and logs: docker compose ps; docker logs redpanda"
+
+  - alert: "ProduceRateLow"
+    expr: "rp:produce_batches_per_sec < 1"
+    for: 5m
+    labels: { severity: "warning", service: "redpanda" }
+    annotations:
+      summary: "Low produce rate"
+      description: "Batches/s < 1 for 5 minutes. Verify producers and upstream workload."
+      runbook: "Use Console -> Topics to confirm traffic; check producer logs."
+
+  - alert: "ConsumerLagHighWarning"
+    expr: "rp:consumer_lag_avg_5m:group_topic > 1000"
+    for: 10m
+    labels: { severity: "warning", service: "redpanda" }
+    annotations:
+      summary: "Consumer lag high (warning)"
+      description: "Group {{ $labels.consumergroup }} / topic {{ $labels.topic }} avg lag > 1k for 10m."
+      runbook: "Scale consumers or reduce producer rate; check stuck partitions."
+
+  - alert: "ConsumerLagHighCritical"
+    expr: "rp:consumer_lag_max_5m:group_topic > 10000"
+    for: 15m
+    labels: { severity: "critical", service: "redpanda" }
+    annotations:
+      summary: "Consumer lag high (critical)"
+      description: "Group {{ $labels.consumergroup }} / topic {{ $labels.topic }} max lag > 10k for 15m."
+      runbook: "Immediate action: rebalance/scale consumers; inspect consumer errors."
+
+  - alert: "DiskUsageHighWarning"
+    expr: "host:disk_used_percent > 80"
+    for: 10m
+    labels: { severity: "warning", service: "platform" }
+    annotations:
+      summary: "Disk usage high (>80%)"
+      description: "Disk usage {{ $value | printf \"%.1f\" }}% for 10m on {{ $labels.instance }}."
+      runbook: "Free space or expand volume; check large topics/segments."
+
+  - alert: "DiskUsageHighCritical"
+    expr: "host:disk_used_percent > 90"
+    for: 10m
+    labels: { severity: "critical", service: "platform" }
+    annotations:
+      summary: "Disk usage critical (>90%)"
+      description: "Disk usage {{ $value | printf \"%.1f\" }}% for 10m on {{ $labels.instance }}."
+      runbook: "Emergency cleanup or increase storage; throttle producers if needed."
